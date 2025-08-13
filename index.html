@@ -18,6 +18,8 @@
       --lav:#caa9ff;
       --ink:#1a1640;
       --bg:#eaf7ff;
+      --fur:#fff3c4;         /* creamy fur */
+      --patch:#8d6e63;       /* light brown patch */
     }
     html,body{height:100%;}
     body{
@@ -170,19 +172,24 @@
     resize();
 
     // --- Game state --------------------------------------------------------
-    let running=false, paused=false, gameOver=false;
+    let running=false, paused=false;
     let time=0, last=0, dt=0;
-    let speed=260; // px/s at DPR=1; will scale with DPR
-    let accel=7;   // speed increase per second
+    let speed=220*DPR;   // a bit slower to start
+    let accel=5*DPR;     // gentler ramp-up
     let score=0, hi=Number(localStorage.getItem('jumpingPuppyHighScore')||0);
     let obstacles=[]; let particles=[]; let confetti=[];
 
     // Ground level
     function groundY(){ return canvas.height*0.82; }
 
-    // --- Input -------------------------------------------------------------
-    let jumpQueued=false;
-    function queueJump(){ jumpQueued=true; }
+    // --- Input + jump buffering (feel-good controls) ----------------------
+    let jumpQueued=false;           // pressed recently
+    let bufferTimer=0;              // jump buffer allows early input
+    let coyoteTimer=0;              // small grace after leaving ground
+    const BUFFER_TIME=0.12;         // seconds
+    const COYOTE_TIME=0.1;          // seconds
+
+    function queueJump(){ jumpQueued=true; bufferTimer=BUFFER_TIME; }
     window.addEventListener('keydown', (e)=>{
       if(['Space','KeyW','ArrowUp'].includes(e.code)) { e.preventDefault(); queueJump(); }
       else if(e.code==='KeyR'){ restart(); }
@@ -213,21 +220,25 @@
       bark(){ beep({type:'square', freq:420, dur:.08, vol:.24}); setTimeout(()=>beep({type:'square', freq:350, dur:.08, vol:.24}),55); }
     };
 
-    // --- Puppy (kawaii) ----------------------------------------------------
-    const pup={ x:0, y:0, vy:0, size:32*DPR, onGround:false, rotate:0, wag:0, blink:0, color:'#ffe082'};
+    // --- Puppy (cuter look) -----------------------------------------------
+    const pup={ x:0, y:0, vy:0, size:34*DPR, onGround:false, rotate:0, wag:0, blink:0 };
     function resetPuppy(){
       pup.x = canvas.width*0.22; pup.y = groundY()-pup.size*0.3; pup.vy=0; pup.onGround=true; pup.rotate=0; pup.wag=0; pup.blink=rand(2,5);
+      bufferTimer=0; coyoteTimer=COYOTE_TIME;
     }
-    function puppyJump(){
-      if(!pup.onGround) return; pup.onGround=false; pup.vy = -500*DPR; sfx.jump();
-      // Dust puff + hearts for kawaii flair
-      for(let i=0;i<8;i++) particles.push({x:pup.x, y:groundY(), vx:rand(-90,90)*DPR, vy:rand(-220,-60)*DPR, r:rand(3,7)*DPR, life:rand(.4,.8), type:'dust'});
-      for(let i=0;i<3;i++) particles.push({x:pup.x+rand(-15,15), y:pup.y-20*DPR, vx:rand(-40,40), vy:rand(-120,-60), r:rand(4,6), life:rand(.6,1), type:'heart'});
+    function tryJump(){
+      if((pup.onGround || coyoteTimer>0) && bufferTimer>0){
+        pup.onGround=false; pup.vy = -600*DPR; // stronger pop
+        sfx.jump();
+        for(let i=0;i<7;i++) particles.push({x:pup.x, y:groundY(), vx:rand(-90,90)*DPR, vy:rand(-220,-60)*DPR, r:rand(3,6)*DPR, life:rand(.4,.8), type:'dust'});
+        for(let i=0;i<2;i++) particles.push({x:pup.x+rand(-12,12), y:pup.y-18*DPR, vx:rand(-40,40), vy:rand(-120,-60), r:rand(4,6), life:rand(.6,1), type:'heart'});
+        bufferTimer=0; coyoteTimer=0;
+      }
     }
     function drawPuppy(){
       const g=groundY();
       const x=pup.x, y=pup.y;
-      const bodyW=pup.size*1.2, bodyH=pup.size*0.75;
+      const bodyW=pup.size*1.25, bodyH=pup.size*0.8;
       ctx.save();
       ctx.translate(x,y); ctx.rotate(pup.rotate);
       // Shadow
@@ -235,49 +246,51 @@
       ctx.save(); ctx.globalAlpha=shAlpha; ctx.fillStyle='rgba(0,0,0,.25)';
       ctx.beginPath(); ctx.ellipse(0, bodyH*.85, bodyW*.6, bodyH*.25, 0, 0, Math.PI*2); ctx.fill(); ctx.restore();
 
-      // Tail (wag)
-      const wagA = Math.sin(pup.wag*10)*0.4;
-      ctx.save(); ctx.translate(-bodyW*0.55, -bodyH*0.1);
-      ctx.rotate(-.5+wagA);
-      roundRect(-6*DPR,0,12*DPR,36*DPR,6*DPR,'#ffd54f'); ctx.fill();
-      ctx.restore();
+      // Tail wag
+      const wagA = Math.sin(pup.wag*12)*0.5;
+      ctx.save(); ctx.translate(-bodyW*0.55, -bodyH*0.05); ctx.rotate(-.6+wagA);
+      roundRect(-5*DPR,0,10*DPR,34*DPR,6*DPR,'#ffe6a7'); ctx.fill(); ctx.restore();
 
-      // Body
-      roundRect(-bodyW*0.5,-bodyH*0.5, bodyW, bodyH, bodyH*0.5, pup.color);
-      ctx.fill();
+      // Body (creamy)
+      roundRect(-bodyW*0.5,-bodyH*0.5, bodyW, bodyH, bodyH*0.55, 'var(--fur)'); ctx.fill();
+      // Patch
+      ctx.fillStyle='var(--patch)'; ctx.beginPath(); ctx.ellipse(-bodyW*0.15, -bodyH*0.2, 14*DPR, 10*DPR, -0.4, 0, Math.PI*2); ctx.fill();
 
-      // Ears (pink)
-      ctx.save(); ctx.translate(bodyW*0.2, -bodyH*0.55); ctx.rotate(-.7);
-      roundRect(-10*DPR,-18*DPR,20*DPR,36*DPR,10*DPR,'#ffb3d6'); ctx.fill(); ctx.restore();
-      ctx.save(); ctx.translate(-bodyW*0.05, -bodyH*0.55); ctx.rotate(.9);
-      roundRect(-10*DPR,-18*DPR,20*DPR,36*DPR,10*DPR,'#ffb3d6'); ctx.fill(); ctx.restore();
+      // Head (bigger + rounder)
+      roundRect(-bodyW*0.18 - 22*DPR, -bodyH*0.8, 54*DPR, 46*DPR, 22*DPR, 'var(--fur)'); ctx.fill();
 
-      // Head
-      roundRect(-bodyW*0.1 - 20*DPR, -bodyH*0.7, 46*DPR, 40*DPR, 18*DPR, '#fff1b8'); ctx.fill();
+      // Ears (droopy, pink inside)
+      ctx.save(); ctx.translate(-bodyW*0.1, -bodyH*0.68); ctx.rotate(.9); roundRect(-11*DPR,-18*DPR,22*DPR,36*DPR,11*DPR,'#ffbed8'); ctx.fill(); ctx.restore();
+      ctx.save(); ctx.translate(bodyW*0.12, -bodyH*0.7); ctx.rotate(-.8); roundRect(-11*DPR,-18*DPR,22*DPR,36*DPR,11*DPR,'#ffbed8'); ctx.fill(); ctx.restore();
 
-      // Eye (blink)
+      // Eyes (bigger + sparkle)
       const blinking = pup.blink<=.1;
       ctx.fillStyle='#2a2850';
-      if(blinking){ ctx.fillRect(-bodyW*0.1, -bodyH*0.48, 16*DPR, 2*DPR); }
-      else{ ctx.beginPath(); ctx.arc(-bodyW*0.06, -bodyH*0.47, 6*DPR, 0, Math.PI*2); ctx.fill(); }
+      if(blinking){ ctx.fillRect(-bodyW*0.05, -bodyH*0.55, 16*DPR, 2*DPR); ctx.fillRect(10*DPR, -bodyH*0.55, 16*DPR, 2*DPR); }
+      else{
+        ctx.beginPath(); ctx.arc(-bodyW*0.0, -bodyH*0.52, 7*DPR, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc( 14*DPR, -bodyH*0.5, 7*DPR, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle='white'; ctx.beginPath(); ctx.arc( -bodyW*0.0-2*DPR, -bodyH*0.54, 2*DPR, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc( 14*DPR-2*DPR, -bodyH*0.52, 2*DPR, 0, Math.PI*2); ctx.fill();
+      }
 
-      // Nose + mouth
-      ctx.fillStyle='#333'; ctx.beginPath(); ctx.arc(10*DPR, -bodyH*0.47, 4*DPR, 0, Math.PI*2); ctx.fill();
-      ctx.strokeStyle='#333'; ctx.lineWidth=2*DPR; ctx.beginPath(); ctx.moveTo(12*DPR, -bodyH*0.44); ctx.quadraticCurveTo(20*DPR, -bodyH*0.4, 18*DPR, -bodyH*0.36); ctx.stroke();
+      // Nose + smile
+      ctx.fillStyle='#333'; ctx.beginPath(); ctx.arc(6*DPR, -bodyH*0.48, 4*DPR, 0, Math.PI*2); ctx.fill();
+      ctx.strokeStyle='#333'; ctx.lineWidth=2*DPR; ctx.beginPath(); ctx.arc(6*DPR, -bodyH*0.44, 10*DPR, 0, Math.PI*.5); ctx.stroke();
 
-      // Blush (kawaii)
-      ctx.fillStyle='rgba(255,105,180,.7)';
-      ctx.beginPath(); ctx.ellipse(-bodyW*0.15, -bodyH*0.39, 7*DPR, 3*DPR, 0, 0, Math.PI*2); ctx.fill();
-      ctx.beginPath(); ctx.ellipse(  0+8*DPR, -bodyH*0.39, 7*DPR, 3*DPR, 0, 0, Math.PI*2); ctx.fill();
+      // Blush
+      ctx.fillStyle='rgba(255,120,170,.7)';
+      ctx.beginPath(); ctx.ellipse(-12*DPR, -bodyH*0.43, 7*DPR, 3*DPR, 0, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse( 22*DPR, -bodyH*0.41, 7*DPR, 3*DPR, 0, 0, Math.PI*2); ctx.fill();
 
-      // Collar
+      // Collar + tag
       roundRect(-bodyW*0.3, -bodyH*0.15, bodyW*0.5, 10*DPR, 5*DPR, '#ff80bf'); ctx.fill();
-      ctx.beginPath(); ctx.arc(bodyW*0.2, -bodyH*0.1, 5*DPR, 0, Math.PI*2); ctx.fillStyle='#ffd166'; ctx.fill();
+      ctx.beginPath(); ctx.arc(bodyW*0.22, -bodyH*0.1, 5*DPR, 0, Math.PI*2); ctx.fillStyle='#ffd166'; ctx.fill();
 
       // Feet
-      ctx.fillStyle='#ffe082';
-      ctx.beginPath(); ctx.ellipse(-bodyW*0.25, bodyH*0.4, 12*DPR, 8*DPR, 0, 0, Math.PI*2); ctx.fill();
-      ctx.beginPath(); ctx.ellipse( bodyW*0.05, bodyH*0.4, 12*DPR, 8*DPR, 0, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle='var(--fur)';
+      ctx.beginPath(); ctx.ellipse(-bodyW*0.25, bodyH*0.42, 12*DPR, 8*DPR, 0, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse( bodyW*0.05, bodyH*0.42, 12*DPR, 8*DPR, 0, 0, Math.PI*2); ctx.fill();
 
       ctx.restore();
     }
@@ -289,27 +302,26 @@
       if(fillStyle){ ctx.fillStyle=fillStyle; }
     }
 
-    // --- Obstacles ---------------------------------------------------------
+    // --- Obstacles (easier) -----------------------------------------------
     function spawnObstacle(){
-      const h = rand(40, 80)*DPR; const w = rand(22, 38)*DPR; const y = groundY()-h;
+      const h = rand(28, 58)*DPR;      // lower
+      const w = rand(20, 34)*DPR;
+      const y = groundY()-h;
       const face = Math.random()<.75;
       obstacles.push({x:canvas.width + w, y, w, h, passed:false, face});
     }
     function drawObstacle(o){
       ctx.save();
-      // Candy-pink column with face
       const grd = ctx.createLinearGradient(0, o.y, 0, o.y+o.h);
       grd.addColorStop(0, '#ff9fd1'); grd.addColorStop(1, '#ff62b5');
       ctx.fillStyle=grd; ctx.strokeStyle='#db2f88'; ctx.lineWidth=3*DPR;
-      roundRect(o.x, o.y, o.w, o.h, 8*DPR); ctx.fill(); ctx.stroke();
+      roundRect(o.x, o.y, o.w, o.h, 10*DPR); ctx.fill(); ctx.stroke();
       if(o.face){
-        // eyes
         ctx.fillStyle='#2a2850';
-        ctx.beginPath(); ctx.arc(o.x+o.w*0.3, o.y+o.h*0.25, 3.5*DPR, 0, Math.PI*2); ctx.fill();
-        ctx.beginPath(); ctx.arc(o.x+o.w*0.7, o.y+o.h*0.28, 3.5*DPR, 0, Math.PI*2); ctx.fill();
-        // goofy mouth
+        ctx.beginPath(); ctx.arc(o.x+o.w*0.3, o.y+o.h*0.3, 3.5*DPR, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(o.x+o.w*0.7, o.y+o.h*0.33, 3.5*DPR, 0, Math.PI*2); ctx.fill();
         ctx.strokeStyle='#2a2850'; ctx.lineWidth=2*DPR;
-        ctx.beginPath(); ctx.arc(o.x+o.w*0.5, o.y+o.h*0.45, 8*DPR, 0, Math.PI); ctx.stroke();
+        ctx.beginPath(); ctx.arc(o.x+o.w*0.5, o.y+o.h*0.55, 8*DPR, 0, Math.PI); ctx.stroke();
       }
       ctx.restore();
     }
@@ -319,13 +331,13 @@
     function drawBackground(dt){
       const W=canvas.width, H=canvas.height;
       // Clouds
-      bgOffset = (bgOffset + dt*speed*0.2) % (W);
+      bgOffset = (bgOffset + dt*speed*0.18) % (W);
       ctx.save(); ctx.globalAlpha=0.9;
       for(let i=0;i<3;i++) drawCloud( W - ((bgOffset + i*W/3)%W), H*0.2 + i*12*DPR, 100*DPR + i*40*DPR );
       ctx.restore();
 
       // Distant hills (lavender)
-      hillOffset = (hillOffset + dt*speed*0.35) % (W);
+      hillOffset = (hillOffset + dt*speed*0.3) % (W);
       ctx.fillStyle= '#e6dcff';
       for(let i=-1;i<3;i++) drawHill(-hillOffset + i*W*0.9, H*0.75, W*0.9, 80*DPR);
 
@@ -334,9 +346,9 @@
       ctx.fillStyle = '#b4f1e0';
       ctx.fillRect(0, gy, W, H-gy);
       // Tiles
-      tileOffset = (tileOffset + dt*speed) % (40*DPR);
+      tileOffset = (tileOffset + dt*speed) % (44*DPR);
       ctx.strokeStyle='rgba(0,0,0,.06)'; ctx.lineWidth=2*DPR;
-      for(let x=-tileOffset; x<W; x+=40*DPR){ ctx.beginPath(); ctx.moveTo(x, gy); ctx.lineTo(x, H); ctx.stroke(); }
+      for(let x=-tileOffset; x<W; x+=44*DPR){ ctx.beginPath(); ctx.moveTo(x, gy); ctx.lineTo(x, H); ctx.stroke(); }
       ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(W, gy); ctx.stroke();
     }
     function drawCloud(x,y,r){
@@ -375,12 +387,12 @@
         ctx.fillStyle=p.c; ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2); ctx.fill(); }
     }
 
-    // --- Spawning logic ----------------------------------------------------
+    // --- Spawning logic (bigger gaps) -------------------------------------
     let spawnTimer=0;
     function updateSpawns(dt){
       spawnTimer -= dt;
-      const minGap = clamp(1.0 - (speed-260)/(200), 0.55, 1.0); // faster speed -> shorter gap, clamped
-      const nextGap = lerp(.9, 1.6, Math.random());
+      const minGap = clamp(1.2 - (speed-220)/(240), 0.9, 1.4); // keep friendlier spacing
+      const nextGap = lerp(1.2, 1.9, Math.random());
       if(spawnTimer<=0){ spawnObstacle(); spawnTimer = Math.max(minGap, nextGap); }
     }
 
@@ -391,12 +403,9 @@
 
     // --- Game loop ---------------------------------------------------------
     function reset(){
-      running=false; paused=false; gameOver=false;
-      time=0; last=performance.now(); dt=0; score=0; speed=260*DPR; accel=7*DPR;
-      obstacles.length=0; particles.length=0; confetti.length=0;
-      spawnTimer=0.5;
-      resetPuppy();
-      updateHUD();
+      paused=false; time=0; last=performance.now(); dt=0; score=0; speed=220*DPR; accel=5*DPR;
+      obstacles.length=0; particles.length=0; confetti.length=0; spawnTimer=0.5;
+      resetPuppy(); updateHUD();
     }
     function start(){ hide(startOverlay); hide(howOverlay); hide(gameOverOverlay); running=true; sfx.bark(); animate(); }
     function restart(){ reset(); start(); }
@@ -406,23 +415,27 @@
       dt = Math.min(.035, (now-last)/1000); last=now; if(paused){ requestAnimationFrame(animate); return; }
       time += dt; speed += accel*dt; pup.wag += dt; pup.blink -= dt; if(pup.blink<=0){ pup.blink=rand(2,5); }
 
+      // Timers for feel-good jump
+      if(bufferTimer>0) bufferTimer -= dt; else jumpQueued=false;
+      if(!pup.onGround) { if(coyoteTimer>0) coyoteTimer -= dt; }
+
       // Physics
-      const g = 1500*DPR; // gravity
-      if(jumpQueued){ puppyJump(); jumpQueued=false; }
+      const g = 1400*DPR; // a bit lighter
+      if(jumpQueued) { tryJump(); }
       pup.vy += g*dt; pup.y += pup.vy*dt;
       const gy = groundY()-pup.size*0.3;
-      if(pup.y>gy){ if(!pup.onGround){ sfx.land(); } pup.y=gy; pup.vy=0; pup.onGround=true; }
+      if(pup.y>gy){ if(!pup.onGround){ sfx.land(); } pup.y=gy; pup.vy=0; pup.onGround=true; coyoteTimer=COYOTE_TIME; }
+      else { pup.onGround=false; }
       pup.rotate = clamp(pup.vy/1200, -0.35, 0.25);
 
       // Update obstacles
       updateSpawns(dt);
       for(let i=obstacles.length-1;i>=0;i--){ const o=obstacles[i]; o.x -= speed*dt; if(o.x+o.w<0){ obstacles.splice(i,1); continue; }
-        // scoring when passed
         if(!o.passed && o.x+o.w < pup.x-10){ o.passed=true; score++; updateHUD(); sfx.score(); }
       }
 
-      // Collision box for puppy
-      const pb = {x:pup.x - pup.size*0.35, y:pup.y - pup.size*0.35, w:pup.size*0.85, h:pup.size*0.7};
+      // Collision box for puppy (smaller for fairness)
+      const pb = {x:pup.x - pup.size*0.3, y:pup.y - pup.size*0.3, w:pup.size*0.75, h:pup.size*0.6};
       for(const o of obstacles){ if(intersects(pb, o)){ endGame(); break; } }
 
       // Draw
@@ -436,7 +449,7 @@
       requestAnimationFrame(animate);
     }
 
-    function endGame(){ gameOver=true; running=false; sfx.bonk();
+    function endGame(){ running=false; sfx.bonk();
       const newHi = Math.max(score, hi); const beat = newHi>hi; hi=newHi; localStorage.setItem('jumpingPuppyHighScore', hi);
       document.getElementById('finalScore').textContent=score;
       document.getElementById('finalBest').textContent=hi;
