@@ -18,8 +18,6 @@
       --lav:#caa9ff;
       --ink:#1a1640;
       --bg:#eaf7ff;
-      --fur:#fff3c4;         /* creamy fur */
-      --patch:#8d6e63;       /* light brown patch */
     }
     html,body{height:100%;}
     body{
@@ -154,6 +152,9 @@
 
   <script>
   (function(){
+    // IMAGE PATH (make sure the PNG is in the repo root)
+    const PUPPY_SRC = "./puppy_transparent.png"; // <-- your uploaded sprite
+
     // --- Utilities ---------------------------------------------------------
     const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
     const rand=(a,b)=>Math.random()*(b-a)+a;
@@ -174,21 +175,17 @@
     // --- Game state --------------------------------------------------------
     let running=false, paused=false;
     let time=0, last=0, dt=0;
-    let speed=220*DPR;   // a bit slower to start
-    let accel=5*DPR;     // gentler ramp-up
+    let speed=220*DPR;   // start speed
+    let accel=5*DPR;     // ramp-up
     let score=0, hi=Number(localStorage.getItem('jumpingPuppyHighScore')||0);
-    let obstacles=[]; let particles=[]; let confetti=[];
+    let obstacles=[]; let confetti=[];
 
     // Ground level
     function groundY(){ return canvas.height*0.82; }
 
-    // --- Input + jump buffering (feel-good controls) ----------------------
-    let jumpQueued=false;           // pressed recently
-    let bufferTimer=0;              // jump buffer allows early input
-    let coyoteTimer=0;              // small grace after leaving ground
-    const BUFFER_TIME=0.12;         // seconds
-    const COYOTE_TIME=0.1;          // seconds
-
+    // --- Input + jump buffering -------------------------------------------
+    let jumpQueued=false; let bufferTimer=0; let coyoteTimer=0;
+    const BUFFER_TIME=0.12, COYOTE_TIME=0.1;
     function queueJump(){ jumpQueued=true; bufferTimer=BUFFER_TIME; }
     window.addEventListener('keydown', (e)=>{
       if(['Space','KeyW','ArrowUp'].includes(e.code)) { e.preventDefault(); queueJump(); }
@@ -198,7 +195,7 @@
     });
     canvas.addEventListener('pointerdown', ()=>queueJump());
 
-    // --- Audio (WebAudio beeps / barks) -----------------------------------
+    // --- Audio -------------------------------------------------------------
     let audioCtx=null; let mute=false;
     function ensureAudio(){ if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)(); }
     function beep({type='sine', freq=440, dur=.12, vol=.2, slide=0}){
@@ -212,103 +209,39 @@
       if(slide!==0){ o.frequency.linearRampToValueAtTime(freq+slide, t+dur); }
       o.start(t); o.stop(end);
     }
-    const sfx={
-      jump(){ beep({type:'square', freq:520, dur:.1, vol:.25, slide:140}); },
-      land(){ beep({type:'triangle', freq:320, dur:.07, vol:.18}); },
-      score(){ beep({type:'sine', freq:760, dur:.06, vol:.22}); setTimeout(()=>beep({type:'sine', freq:920, dur:.06, vol:.22}), 70); },
-      bonk(){ beep({type:'sawtooth', freq:280, dur:.18, vol:.28, slide:-220}); },
-      bark(){ beep({type:'square', freq:420, dur:.08, vol:.24}); setTimeout(()=>beep({type:'square', freq:350, dur:.08, vol:.24}),55); }
-    };
+    const sfx={ jump(){ beep({type:'square', freq:520, dur:.1, vol:.25, slide:140}); }, land(){ beep({type:'triangle', freq:320, dur:.07, vol:.18}); }, score(){ beep({type:'sine', freq:760, dur:.06, vol:.22}); setTimeout(()=>beep({type:'sine', freq:920, dur:.06, vol:.22}), 70); }, bonk(){ beep({type:'sawtooth', freq:280, dur:.18, vol:.28, slide:-220}); }, bark(){ beep({type:'square', freq:420, dur:.08, vol:.24}); setTimeout(()=>beep({type:'square', freq:350, dur:.08, vol:.24}),55); } };
 
-    // --- Puppy (cuter look) -----------------------------------------------
-    const pup={ x:0, y:0, vy:0, size:34*DPR, onGround:false, rotate:0, wag:0, blink:0 };
+    // --- Puppy sprite ------------------------------------------------------
+    const pupImg = new Image(); pupImg.src = PUPPY_SRC;
+    const pup={ x:0, y:0, vy:0, size:90*DPR, onGround:false, rotate:0 };
     function resetPuppy(){
-      pup.x = canvas.width*0.22; pup.y = groundY()-pup.size*0.3; pup.vy=0; pup.onGround=true; pup.rotate=0; pup.wag=0; pup.blink=rand(2,5);
+      pup.x = canvas.width*0.22; pup.y = groundY()-pup.size*0.25; pup.vy=0; pup.onGround=true; pup.rotate=0;
       bufferTimer=0; coyoteTimer=COYOTE_TIME;
     }
     function tryJump(){
       if((pup.onGround || coyoteTimer>0) && bufferTimer>0){
-        pup.onGround=false; pup.vy = -600*DPR; // stronger pop
-        sfx.jump();
-        for(let i=0;i<7;i++) particles.push({x:pup.x, y:groundY(), vx:rand(-90,90)*DPR, vy:rand(-220,-60)*DPR, r:rand(3,6)*DPR, life:rand(.4,.8), type:'dust'});
-        for(let i=0;i<2;i++) particles.push({x:pup.x+rand(-12,12), y:pup.y-18*DPR, vx:rand(-40,40), vy:rand(-120,-60), r:rand(4,6), life:rand(.6,1), type:'heart'});
+        pup.onGround=false; pup.vy = -620*DPR; sfx.jump();
         bufferTimer=0; coyoteTimer=0;
       }
     }
     function drawPuppy(){
       const g=groundY();
       const x=pup.x, y=pup.y;
-      const bodyW=pup.size*1.25, bodyH=pup.size*0.8;
-      ctx.save();
-      ctx.translate(x,y); ctx.rotate(pup.rotate);
-      // Shadow
+      const w=pup.size, h=pup.size*0.82;
+      // shadow
       const shAlpha = clamp(1-((g-y)/200), 0, .35);
       ctx.save(); ctx.globalAlpha=shAlpha; ctx.fillStyle='rgba(0,0,0,.25)';
-      ctx.beginPath(); ctx.ellipse(0, bodyH*.85, bodyW*.6, bodyH*.25, 0, 0, Math.PI*2); ctx.fill(); ctx.restore();
-
-      // Tail wag
-      const wagA = Math.sin(pup.wag*12)*0.5;
-      ctx.save(); ctx.translate(-bodyW*0.55, -bodyH*0.05); ctx.rotate(-.6+wagA);
-      roundRect(-5*DPR,0,10*DPR,34*DPR,6*DPR,'#ffe6a7'); ctx.fill(); ctx.restore();
-
-      // Body (creamy)
-      roundRect(-bodyW*0.5,-bodyH*0.5, bodyW, bodyH, bodyH*0.55, 'var(--fur)'); ctx.fill();
-      // Patch
-      ctx.fillStyle='var(--patch)'; ctx.beginPath(); ctx.ellipse(-bodyW*0.15, -bodyH*0.2, 14*DPR, 10*DPR, -0.4, 0, Math.PI*2); ctx.fill();
-
-      // Head (bigger + rounder)
-      roundRect(-bodyW*0.18 - 22*DPR, -bodyH*0.8, 54*DPR, 46*DPR, 22*DPR, 'var(--fur)'); ctx.fill();
-
-      // Ears (droopy, pink inside)
-      ctx.save(); ctx.translate(-bodyW*0.1, -bodyH*0.68); ctx.rotate(.9); roundRect(-11*DPR,-18*DPR,22*DPR,36*DPR,11*DPR,'#ffbed8'); ctx.fill(); ctx.restore();
-      ctx.save(); ctx.translate(bodyW*0.12, -bodyH*0.7); ctx.rotate(-.8); roundRect(-11*DPR,-18*DPR,22*DPR,36*DPR,11*DPR,'#ffbed8'); ctx.fill(); ctx.restore();
-
-      // Eyes (bigger + sparkle)
-      const blinking = pup.blink<=.1;
-      ctx.fillStyle='#2a2850';
-      if(blinking){ ctx.fillRect(-bodyW*0.05, -bodyH*0.55, 16*DPR, 2*DPR); ctx.fillRect(10*DPR, -bodyH*0.55, 16*DPR, 2*DPR); }
-      else{
-        ctx.beginPath(); ctx.arc(-bodyW*0.0, -bodyH*0.52, 7*DPR, 0, Math.PI*2); ctx.fill();
-        ctx.beginPath(); ctx.arc( 14*DPR, -bodyH*0.5, 7*DPR, 0, Math.PI*2); ctx.fill();
-        ctx.fillStyle='white'; ctx.beginPath(); ctx.arc( -bodyW*0.0-2*DPR, -bodyH*0.54, 2*DPR, 0, Math.PI*2); ctx.fill();
-        ctx.beginPath(); ctx.arc( 14*DPR-2*DPR, -bodyH*0.52, 2*DPR, 0, Math.PI*2); ctx.fill();
-      }
-
-      // Nose + smile
-      ctx.fillStyle='#333'; ctx.beginPath(); ctx.arc(6*DPR, -bodyH*0.48, 4*DPR, 0, Math.PI*2); ctx.fill();
-      ctx.strokeStyle='#333'; ctx.lineWidth=2*DPR; ctx.beginPath(); ctx.arc(6*DPR, -bodyH*0.44, 10*DPR, 0, Math.PI*.5); ctx.stroke();
-
-      // Blush
-      ctx.fillStyle='rgba(255,120,170,.7)';
-      ctx.beginPath(); ctx.ellipse(-12*DPR, -bodyH*0.43, 7*DPR, 3*DPR, 0, 0, Math.PI*2); ctx.fill();
-      ctx.beginPath(); ctx.ellipse( 22*DPR, -bodyH*0.41, 7*DPR, 3*DPR, 0, 0, Math.PI*2); ctx.fill();
-
-      // Collar + tag
-      roundRect(-bodyW*0.3, -bodyH*0.15, bodyW*0.5, 10*DPR, 5*DPR, '#ff80bf'); ctx.fill();
-      ctx.beginPath(); ctx.arc(bodyW*0.22, -bodyH*0.1, 5*DPR, 0, Math.PI*2); ctx.fillStyle='#ffd166'; ctx.fill();
-
-      // Feet
-      ctx.fillStyle='var(--fur)';
-      ctx.beginPath(); ctx.ellipse(-bodyW*0.25, bodyH*0.42, 12*DPR, 8*DPR, 0, 0, Math.PI*2); ctx.fill();
-      ctx.beginPath(); ctx.ellipse( bodyW*0.05, bodyH*0.42, 12*DPR, 8*DPR, 0, 0, Math.PI*2); ctx.fill();
-
+      ctx.beginPath(); ctx.ellipse(x, y+h*0.45, w*0.45, h*0.16, 0, 0, Math.PI*2); ctx.fill(); ctx.restore();
+      // sprite
+      ctx.save(); ctx.translate(x, y); ctx.rotate(pup.rotate);
+      if(pupImg.complete) ctx.drawImage(pupImg, -w*0.5, -h*0.6, w, h);
       ctx.restore();
     }
 
-    function roundRect(x,y,w,h,r, fillStyle){
-      ctx.beginPath();
-      ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r);
-      ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r);
-      if(fillStyle){ ctx.fillStyle=fillStyle; }
-    }
-
-    // --- Obstacles (easier) -----------------------------------------------
+    // --- Obstacles ---------------------------------------------------------
     function spawnObstacle(){
-      const h = rand(28, 58)*DPR;      // lower
-      const w = rand(20, 34)*DPR;
-      const y = groundY()-h;
-      const face = Math.random()<.75;
-      obstacles.push({x:canvas.width + w, y, w, h, passed:false, face});
+      const h = rand(28, 52)*DPR; const w = rand(20, 34)*DPR; const y = groundY()-h; const face=Math.random()<.7;
+      obstacles.push({x:canvas.width+w, y, w, h, passed:false, face});
     }
     function drawObstacle(o){
       ctx.save();
@@ -316,147 +249,69 @@
       grd.addColorStop(0, '#ff9fd1'); grd.addColorStop(1, '#ff62b5');
       ctx.fillStyle=grd; ctx.strokeStyle='#db2f88'; ctx.lineWidth=3*DPR;
       roundRect(o.x, o.y, o.w, o.h, 10*DPR); ctx.fill(); ctx.stroke();
-      if(o.face){
-        ctx.fillStyle='#2a2850';
-        ctx.beginPath(); ctx.arc(o.x+o.w*0.3, o.y+o.h*0.3, 3.5*DPR, 0, Math.PI*2); ctx.fill();
-        ctx.beginPath(); ctx.arc(o.x+o.w*0.7, o.y+o.h*0.33, 3.5*DPR, 0, Math.PI*2); ctx.fill();
-        ctx.strokeStyle='#2a2850'; ctx.lineWidth=2*DPR;
-        ctx.beginPath(); ctx.arc(o.x+o.w*0.5, o.y+o.h*0.55, 8*DPR, 0, Math.PI); ctx.stroke();
-      }
+      if(o.face){ ctx.fillStyle='#2a2850'; ctx.beginPath(); ctx.arc(o.x+o.w*0.3, o.y+o.h*0.3, 3.5*DPR,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(o.x+o.w*0.7, o.y+o.h*0.33, 3.5*DPR,0,Math.PI*2); ctx.fill(); ctx.strokeStyle='#2a2850'; ctx.lineWidth=2*DPR; ctx.beginPath(); ctx.arc(o.x+o.w*0.5, o.y+o.h*0.55, 8*DPR, 0, Math.PI); ctx.stroke(); }
       ctx.restore();
     }
 
-    // --- Background (parallax) --------------------------------------------
-    let bgOffset=0; let hillOffset=0; let tileOffset=0;
+    // --- Background --------------------------------------------------------
+    let bgOffset=0, hillOffset=0, tileOffset=0;
     function drawBackground(dt){
       const W=canvas.width, H=canvas.height;
-      // Clouds
-      bgOffset = (bgOffset + dt*speed*0.18) % (W);
-      ctx.save(); ctx.globalAlpha=0.9;
-      for(let i=0;i<3;i++) drawCloud( W - ((bgOffset + i*W/3)%W), H*0.2 + i*12*DPR, 100*DPR + i*40*DPR );
-      ctx.restore();
+      bgOffset = (bgOffset + dt*speed*0.18) % W;
+      ctx.save(); ctx.globalAlpha=0.9; for(let i=0;i<3;i++) drawCloud( W - ((bgOffset + i*W/3)%W), H*0.2 + i*12*DPR, 100*DPR + i*40*DPR ); ctx.restore();
+      hillOffset = (hillOffset + dt*speed*0.3) % W; ctx.fillStyle='#e6dcff'; for(let i=-1;i<3;i++) drawHill(-hillOffset + i*W*0.9, H*0.75, W*0.9, 80*DPR);
+      const gy = groundY(); ctx.fillStyle='#b4f1e0'; ctx.fillRect(0, gy, W, H-gy);
+      tileOffset = (tileOffset + dt*speed) % (44*DPR); ctx.strokeStyle='rgba(0,0,0,.06)'; ctx.lineWidth=2*DPR; for(let x=-tileOffset; x<W; x+=44*DPR){ ctx.beginPath(); ctx.moveTo(x, gy); ctx.lineTo(x, H); ctx.stroke(); } ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(W, gy); ctx.stroke();
+    }
+    function drawCloud(x,y,r){ ctx.fillStyle='rgba(255,255,255,.9)'; ctx.beginPath(); ctx.arc(x,y,r*0.6,0,Math.PI*2); ctx.arc(x+r*0.4,y+5*DPR,r*0.45,0,Math.PI*2); ctx.arc(x-r*0.4,y+8*DPR,r*0.5,0,Math.PI*2); ctx.fill(); }
+    function drawHill(x,base,w,h){ ctx.beginPath(); ctx.moveTo(x,base); ctx.quadraticCurveTo(x+w*0.5, base-h, x+w, base); ctx.lineTo(x+w, base+h); ctx.lineTo(x, base+h); ctx.closePath(); ctx.fill(); }
 
-      // Distant hills (lavender)
-      hillOffset = (hillOffset + dt*speed*0.3) % (W);
-      ctx.fillStyle= '#e6dcff';
-      for(let i=-1;i<3;i++) drawHill(-hillOffset + i*W*0.9, H*0.75, W*0.9, 80*DPR);
+    // --- Confetti ----------------------------------------------------------
+    function spawnConfetti(){ for(let i=0;i<90;i++) confetti.push({x:canvas.width/2, y:canvas.height*0.25, vx:rand(-220,220), vy:rand(-350,-120), r:rand(2,4), c:["#ff8bc8","#8be7ff","#ffd166","#a7ffcb"][Math.floor(rand(0,4))], life:rand(1.2,1.8)}); }
+    function drawConfetti(dt){ for(let i=confetti.length-1;i>=0;i--){ const p=confetti[i]; p.vy += 600*dt; p.x+=p.vx*dt; p.y+=p.vy*dt; p.life-=dt; if(p.life<=0 || p.y>canvas.height) confetti.splice(i,1); ctx.fillStyle=p.c; ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2); ctx.fill(); } }
 
-      // Ground
-      const gy = groundY();
-      ctx.fillStyle = '#b4f1e0';
-      ctx.fillRect(0, gy, W, H-gy);
-      // Tiles
-      tileOffset = (tileOffset + dt*speed) % (44*DPR);
-      ctx.strokeStyle='rgba(0,0,0,.06)'; ctx.lineWidth=2*DPR;
-      for(let x=-tileOffset; x<W; x+=44*DPR){ ctx.beginPath(); ctx.moveTo(x, gy); ctx.lineTo(x, H); ctx.stroke(); }
-      ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(W, gy); ctx.stroke();
-    }
-    function drawCloud(x,y,r){
-      ctx.fillStyle='rgba(255,255,255,.9)';
-      ctx.beginPath(); ctx.arc(x,y,r*0.6,0,Math.PI*2);
-      ctx.arc(x+r*0.4,y+5*DPR,r*0.45,0,Math.PI*2);
-      ctx.arc(x-r*0.4,y+8*DPR,r*0.5,0,Math.PI*2);
-      ctx.fill();
-    }
-    function drawHill(x,base,w,h){
-      ctx.beginPath(); ctx.moveTo(x,base); ctx.quadraticCurveTo(x+w*0.5, base-h, x+w, base); ctx.lineTo(x+w, base+h); ctx.lineTo(x, base+h); ctx.closePath(); ctx.fill();
-    }
-
-    // --- Particles ---------------------------------------------------------
-    function drawParticles(dt){
-      for(let i=particles.length-1;i>=0;i--){ const p=particles[i]; p.vy+= 900*DPR*dt; p.x+=p.vx*dt; p.y+=p.vy*dt; p.life-=dt; if(p.life<=0) particles.splice(i,1);
-        if(p.type==='heart'){ drawHeart(p.x,p.y,p.r*1.2,'#ff7fb8'); }
-        else{ ctx.fillStyle='rgba(255,255,255,.8)'; ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2); ctx.fill(); }
-      }
-    }
-    function drawHeart(x,y,s,c){
-      ctx.save(); ctx.translate(x,y); ctx.rotate(-Math.PI/18);
-      ctx.fillStyle=c; ctx.beginPath();
-      ctx.moveTo(0,0);
-      ctx.bezierCurveTo(-s,-s, -2*s, s*0.2, 0, s*1.6);
-      ctx.bezierCurveTo(2*s, s*0.2, s,-s, 0,0);
-      ctx.fill(); ctx.restore();
-    }
-
-    // Confetti for new high score
-    function spawnConfetti(){
-      for(let i=0;i<100;i++) confetti.push({x:canvas.width/2, y:canvas.height*0.25, vx:rand(-220,220), vy:rand(-350,-120), r:rand(2,4), c:["#ff8bc8","#8be7ff","#ffd166","#a7ffcb"][Math.floor(rand(0,4))], life:rand(1.2,1.8)});
-    }
-    function drawConfetti(dt){
-      for(let i=confetti.length-1;i>=0;i--){ const p=confetti[i]; p.vy += 600*dt; p.x+=p.vx*dt; p.y+=p.vy*dt; p.life-=dt; if(p.life<=0 || p.y>canvas.height) confetti.splice(i,1);
-        ctx.fillStyle=p.c; ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2); ctx.fill(); }
-    }
-
-    // --- Spawning logic (bigger gaps) -------------------------------------
-    let spawnTimer=0;
-    function updateSpawns(dt){
-      spawnTimer -= dt;
-      const minGap = clamp(1.2 - (speed-220)/(240), 0.9, 1.4); // keep friendlier spacing
-      const nextGap = lerp(1.2, 1.9, Math.random());
-      if(spawnTimer<=0){ spawnObstacle(); spawnTimer = Math.max(minGap, nextGap); }
-    }
+    // --- Spawning logic ----------------------------------------------------
+    let spawnTimer=0; function updateSpawns(dt){ spawnTimer -= dt; const minGap = clamp(1.2 - (speed-220)/(240), 0.9, 1.4); const nextGap = lerp(1.2, 1.9, Math.random()); if(spawnTimer<=0){ spawnObstacle(); spawnTimer = Math.max(minGap, nextGap); } }
 
     // --- Collision ---------------------------------------------------------
-    function intersects(a,b){
-      return !(a.x+a.w < b.x || a.x > b.x+b.w || a.y+a.h < b.y || a.y > b.y+b.h);
-    }
+    function intersects(a,b){ return !(a.x+a.w < b.x || a.x > b.x+b.w || a.y+a.h < b.y || a.y > b.y+b.h); }
 
     // --- Game loop ---------------------------------------------------------
-    function reset(){
-      paused=false; time=0; last=performance.now(); dt=0; score=0; speed=220*DPR; accel=5*DPR;
-      obstacles.length=0; particles.length=0; confetti.length=0; spawnTimer=0.5;
-      resetPuppy(); updateHUD();
-    }
+    function reset(){ paused=false; time=0; last=performance.now(); dt=0; score=0; speed=220*DPR; accel=5*DPR; obstacles.length=0; confetti.length=0; spawnTimer=0.6; resetPuppy(); updateHUD(); }
     function start(){ hide(startOverlay); hide(howOverlay); hide(gameOverOverlay); running=true; sfx.bark(); animate(); }
     function restart(){ reset(); start(); }
 
     function animate(now=performance.now()){
       if(!running){ return; }
       dt = Math.min(.035, (now-last)/1000); last=now; if(paused){ requestAnimationFrame(animate); return; }
-      time += dt; speed += accel*dt; pup.wag += dt; pup.blink -= dt; if(pup.blink<=0){ pup.blink=rand(2,5); }
+      time += dt; speed += accel*dt; 
 
-      // Timers for feel-good jump
-      if(bufferTimer>0) bufferTimer -= dt; else jumpQueued=false;
-      if(!pup.onGround) { if(coyoteTimer>0) coyoteTimer -= dt; }
+      // jump helpers
+      if(bufferTimer>0) bufferTimer -= dt; else jumpQueued=false; if(!pup.onGround){ if(coyoteTimer>0) coyoteTimer -= dt; }
 
-      // Physics
-      const g = 1400*DPR; // a bit lighter
-      if(jumpQueued) { tryJump(); }
-      pup.vy += g*dt; pup.y += pup.vy*dt;
-      const gy = groundY()-pup.size*0.3;
-      if(pup.y>gy){ if(!pup.onGround){ sfx.land(); } pup.y=gy; pup.vy=0; pup.onGround=true; coyoteTimer=COYOTE_TIME; }
-      else { pup.onGround=false; }
-      pup.rotate = clamp(pup.vy/1200, -0.35, 0.25);
+      // physics
+      const g = 1400*DPR; if(jumpQueued) { tryJump(); }
+      pup.vy += g*dt; pup.y += pup.vy*dt; const gy = groundY()-pup.size*0.25; if(pup.y>gy){ if(!pup.onGround){ sfx.land(); } pup.y=gy; pup.vy=0; pup.onGround=true; coyoteTimer=COYOTE_TIME; } else { pup.onGround=false; }
+      pup.rotate = clamp(pup.vy/1200, -0.18, 0.18);
 
-      // Update obstacles
-      updateSpawns(dt);
-      for(let i=obstacles.length-1;i>=0;i--){ const o=obstacles[i]; o.x -= speed*dt; if(o.x+o.w<0){ obstacles.splice(i,1); continue; }
-        if(!o.passed && o.x+o.w < pup.x-10){ o.passed=true; score++; updateHUD(); sfx.score(); }
-      }
+      // obstacles
+      updateSpawns(dt); for(let i=obstacles.length-1;i>=0;i--){ const o=obstacles[i]; o.x -= speed*dt; if(o.x+o.w<0){ obstacles.splice(i,1); continue; } if(!o.passed && o.x+o.w < pup.x-10){ o.passed=true; score++; updateHUD(); sfx.score(); } }
 
-      // Collision box for puppy (smaller for fairness)
-      const pb = {x:pup.x - pup.size*0.3, y:pup.y - pup.size*0.3, w:pup.size*0.75, h:pup.size*0.6};
+      // collision box relative to sprite
+      const pb = { x:pup.x - pup.size*0.28, y:pup.y - pup.size*0.55, w:pup.size*0.56, h:pup.size*0.6 };
       for(const o of obstacles){ if(intersects(pb, o)){ endGame(); break; } }
 
-      // Draw
+      // draw
       ctx.clearRect(0,0,canvas.width,canvas.height);
       drawBackground(dt);
       for(const o of obstacles) drawObstacle(o);
-      drawParticles(dt);
       drawPuppy();
       drawConfetti(dt);
 
       requestAnimationFrame(animate);
     }
 
-    function endGame(){ running=false; sfx.bonk();
-      const newHi = Math.max(score, hi); const beat = newHi>hi; hi=newHi; localStorage.setItem('jumpingPuppyHighScore', hi);
-      document.getElementById('finalScore').textContent=score;
-      document.getElementById('finalBest').textContent=hi;
-      document.getElementById('quip').textContent = beat ? "New best! Someone gets extra treats!" : quips[Math.floor(Math.random()*quips.length)];
-      if(beat){ spawnConfetti(); sfx.score(); setTimeout(()=>sfx.score(),120); }
-      show(gameOverOverlay);
-    }
+    function endGame(){ running=false; sfx.bonk(); const newHi=Math.max(score, hi); const beat=newHi>hi; hi=newHi; localStorage.setItem('jumpingPuppyHighScore', hi); document.getElementById('finalScore').textContent=score; document.getElementById('finalBest').textContent=hi; document.getElementById('quip').textContent = beat ? "New best! Someone gets extra treats!" : quips[Math.floor(Math.random()*quips.length)]; if(beat){ spawnConfetti(); sfx.score(); setTimeout(()=>sfx.score(),120); } show(gameOverOverlay); }
 
     function updateHUD(){ document.getElementById('score').textContent=score; document.getElementById('hiscore').textContent=hi; }
 
@@ -480,11 +335,7 @@
     howBtn.addEventListener('click', ()=>{ hide(startOverlay); show(howOverlay); });
     backBtn.addEventListener('click', ()=>{ hide(howOverlay); show(startOverlay); });
     againBtn.addEventListener('click', ()=>{ hide(gameOverOverlay); restart(); start(); });
-    shareBtn.addEventListener('click', ()=>{
-      const txt=`I scored ${score} in Jumping Puppy Runner! Can you beat me? 🐶🏆`;
-      if(navigator.share){ navigator.share({title:'Jumping Puppy Runner', text:txt}); }
-      else{ navigator.clipboard.writeText(txt); alert('Copied to clipboard! Paste it anywhere.'); }
-    });
+    shareBtn.addEventListener('click', ()=>{ const txt=`I scored ${score} in Jumping Puppy Runner! Can you beat me? 🐶🏆`; if(navigator.share){ navigator.share({title:'Jumping Puppy Runner', text:txt}); } else { navigator.clipboard.writeText(txt); alert('Copied to clipboard! Paste it anywhere.'); } });
     retryBtn.addEventListener('click', ()=>{ if(running){ endGame(); } hide(gameOverOverlay); restart(); start(); });
 
     function togglePause(){ paused=!paused; pauseBtn.setAttribute('aria-pressed', String(paused)); pauseBtn.textContent = paused? '▶️ Resume' : '⏸ Pause'; }
@@ -493,17 +344,14 @@
     function toggleMute(){ mute=!mute; muteBtn.setAttribute('aria-pressed', String(mute)); muteBtn.textContent = mute? '🔇 Muted' : '🔊 Sound'; }
     muteBtn.addEventListener('click', toggleMute);
 
-    const quips=[
-      'Paws were a bit slippery there.',
-      'Obstacles 1 · Puppy 0. Rematch?',
-      'Gravity is undefeated.',
-      'That obstacle was flirting with you.',
-      'Tail up. Chin up. Try again!',
-    ];
+    const quips=[ 'Paws were a bit slippery there.', 'Obstacles 1 · Puppy 0. Rematch?', 'Gravity is undefeated.', 'That obstacle was flirting with you.', 'Tail up. Chin up. Try again!' ];
 
     // Kickoff
     document.getElementById('hiscore').textContent=hi;
     reset();
+
+    // Helpers
+    function roundRect(x,y,w,h,r){ ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); }
   })();
   </script>
 </body>
